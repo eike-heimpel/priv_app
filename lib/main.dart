@@ -12,11 +12,11 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Voice Recording App',
+      title: 'Eike Builds an App',
       theme: ThemeData(
         primarySwatch: Colors.blue,
       ),
-      home: MyHomePage(title: 'Voice Recording Home Page'),
+      home: MyHomePage(title: 'Home Page'),
     );
   }
 }
@@ -38,6 +38,9 @@ class _MyHomePageState extends State<MyHomePage> {
   String _filePath = '';
   Future<void>? _init;
 
+  bool isInitialized = false;
+
+
   @override
   void initState() {
     super.initState();
@@ -47,25 +50,21 @@ class _MyHomePageState extends State<MyHomePage> {
   }
 
   Future<void> _initialize() async {
-    final appDocumentsDirectory =
-        await path_provider.getApplicationDocumentsDirectory();
-    final folder = Directory('${appDocumentsDirectory.path}/$_folderName');
-    if (!folder.existsSync()) {
-      folder.createSync();
-    }
-    _filePath = '${folder.path}/$_fileName';
-
-    // Request storage permission
-    if (await Permission.storage.request().isGranted) {
-      // Permission is granted, proceed with opening recorder and player
-      await _recorder.openRecorder();
-      await _player.openPlayer();
-    } else {
-      // Permission is denied
-      // TODO: Handle the case where permission is not granted
-      print('Storage permission is not granted');
-    }
+  final appDocumentsDirectory = await path_provider.getApplicationDocumentsDirectory();
+  final folder = Directory('${appDocumentsDirectory.path}/$_folderName');
+  if (!folder.existsSync()) {
+    folder.createSync();
   }
+  _filePath = '${folder.path}/$_fileName';
+
+  await _recorder.openRecorder();
+  await _player.openPlayer();
+
+  setState(() {
+    isInitialized = true;
+  });
+}
+
 
   @override
   void dispose() async {
@@ -75,16 +74,20 @@ class _MyHomePageState extends State<MyHomePage> {
   }
 
   Future<void> _startRecording() async {
-    await _recorder.startRecorder(toFile: _filePath);
+      print('Start Recording');
+      await _recorder.startRecorder(toFile: _filePath);
   }
 
   Future<void> _stopRecording() async {
-    await _recorder.stopRecorder();
+      print('Stop Recording');
+      await _recorder.stopRecorder();
   }
 
   Future<void> _playRecording() async {
-    await _player.startPlayer(fromURI: _filePath);
+      print('Play Recording');
+      await _player.startPlayer(fromURI: _filePath);
   }
+
 
   void _checkFile() {
     final file = File(_filePath);
@@ -125,17 +128,17 @@ class _MyHomePageState extends State<MyHomePage> {
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: <Widget>[
                   FloatingActionButton(
-                    onPressed: _startRecording,
+                    onPressed: isInitialized ? _startRecording : null,
                     tooltip: 'Start Recording',
                     child: Icon(Icons.mic),
                   ),
                   FloatingActionButton(
-                    onPressed: _stopRecording,
+                    onPressed: isInitialized ? _stopRecording : null,
                     tooltip: 'Stop Recording',
                     child: Icon(Icons.stop),
                   ),
                   FloatingActionButton(
-                    onPressed: _playRecording,
+                    onPressed: isInitialized ? _playRecording : null,
                     tooltip: 'Play Recording',
                     child: Icon(Icons.play_arrow),
                   ),
