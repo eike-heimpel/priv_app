@@ -4,6 +4,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_sound/flutter_sound.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:path_provider/path_provider.dart' as path_provider;
+import 'dart:convert';
+import 'package:encrypt/encrypt.dart' as encrypt;
 
 void main() {
   runApp(MyApp());
@@ -110,21 +112,51 @@ Future<void> _initialize() async {
     });
   }
 
-  Future<void> _stopRecording() async {
-    print('Stop Recording');
-    await _recorder.stopRecorder();
+Future<void> _stopRecording() async {
+  print('Stop Recording');
+  await _recorder.stopRecorder();
 
-    setState(() {
-      isRecording = false;
-    });
+  setState(() {
+    isRecording = false;
+  });
 
-    _timer.cancel();
-  }
+  _timer.cancel();
 
-  Future<void> _playRecording() async {
-    print('Play Recording');
-    await _player.startPlayer(fromURI: _filePath);
-  }
+  // Encrypt the recording
+  final plainData = await File(_filePath).readAsBytes();
+  final key = encrypt.Key.fromLength(32); // 256 bit key for AES-256
+  final iv = encrypt.IV.fromLength(16); // 128 bit block size for AES
+  final encrypter = encrypt.Encrypter(encrypt.AES(key));
+  final encryptedData = encrypter.encryptBytes(plainData, iv: iv);
+  
+  // Write encrypted data back to file
+  await File(_filePath).writeAsBytes(encryptedData.bytes);
+}
+
+Future<void> _playRecording() async {
+  print('Play Recording');
+
+  // Decrypt the recording
+  final encryptedData = await File(_filePath).readAsBytes();
+  final key = encrypt.Key.fromLength(32); // 256 bit key for AES-256
+  final iv = encrypt.IV.fromLength(16); // 128 bit block size for AES
+  final encrypter = encrypt.Encrypter(encrypt.AES(key));
+  
+  final encryptedFile = encrypt.Encrypted(encryptedData);
+  final decryptedData = encrypter.decryptBytes(encryptedFile, iv: iv);
+
+  // Write decrypted data to a temporary file
+  final tempFile = File('$_filePath.temp');
+  await tempFile.writeAsBytes(decryptedData);
+
+  await _player.startPlayer(fromURI: tempFile.path);
+
+  // Delete the temporary file
+  await tempFile.delete();
+}
+
+
+
 
   @override
   Widget build(BuildContext context) {
