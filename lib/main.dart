@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_sound/flutter_sound.dart';
@@ -14,9 +15,24 @@ class MyApp extends StatelessWidget {
     return MaterialApp(
       title: 'Eike Builds an App',
       theme: ThemeData(
-        primarySwatch: Colors.blue,
+        brightness: Brightness.dark,
+        primaryColor: Colors.grey[700],
+        colorScheme: ColorScheme.dark(
+          primary: Colors.grey[700]!,
+          secondary: Colors.yellow,
+          background: Colors.grey[850]!,
+        ),
+        floatingActionButtonTheme: FloatingActionButtonThemeData(
+          backgroundColor: Colors.grey[700],
+        ),
+        appBarTheme: AppBarTheme(
+          color: Colors.grey[700],
+        ),
+        textTheme: TextTheme(
+          bodyText2: TextStyle(color: Colors.white),
+        ),
       ),
-      home: MyHomePage(title: 'Home Page'),
+      home: MyHomePage(title: 'Eike`s Privacy Data Collector'),
     );
   }
 }
@@ -37,9 +53,10 @@ class _MyHomePageState extends State<MyHomePage> {
   String _fileName = 'temp2.wav';
   String _filePath = '';
   Future<void>? _init;
-
+  bool isRecording = false;
+  int _recordDuration = 0;
+  late Timer _timer;
   bool isInitialized = false;
-
 
   @override
   void initState() {
@@ -49,9 +66,9 @@ class _MyHomePageState extends State<MyHomePage> {
     _init = _initialize();
   }
 
-  Future<void> _initialize() async {
-  final appDocumentsDirectory = await path_provider.getApplicationDocumentsDirectory();
-  final folder = Directory('${appDocumentsDirectory.path}/$_folderName');
+Future<void> _initialize() async {
+  final appTemporaryDirectory = await path_provider.getTemporaryDirectory();
+  final folder = Directory('${appTemporaryDirectory.path}/$_folderName');
   if (!folder.existsSync()) {
     folder.createSync();
   }
@@ -74,43 +91,39 @@ class _MyHomePageState extends State<MyHomePage> {
   }
 
   Future<void> _startRecording() async {
-      print('Start Recording');
-      await _recorder.startRecorder(toFile: _filePath);
+    print('Start Recording');
+    await _recorder.startRecorder(toFile: _filePath);
+
+    setState(() {
+      isRecording = true;
+      _recordDuration = 0;
+    });
+
+    _timer = Timer.periodic(Duration(seconds: 1), (Timer t) {
+      if (_recordDuration >= 60) {
+        _stopRecording();
+      } else {
+        setState(() {
+          _recordDuration++;
+        });
+      }
+    });
   }
 
   Future<void> _stopRecording() async {
-      print('Stop Recording');
-      await _recorder.stopRecorder();
+    print('Stop Recording');
+    await _recorder.stopRecorder();
+
+    setState(() {
+      isRecording = false;
+    });
+
+    _timer.cancel();
   }
 
   Future<void> _playRecording() async {
-      print('Play Recording');
-      await _player.startPlayer(fromURI: _filePath);
-  }
-
-
-  void _checkFile() {
-    final file = File(_filePath);
-    final fileExists = file.existsSync();
-    showDialog(
-      context: context,
-      builder: (BuildContext context) {
-        return AlertDialog(
-          title: Text('File Check Result'),
-          content: Text(fileExists
-              ? 'File exists at $_filePath'
-              : 'File does not exist at $_filePath'),
-          actions: [
-            TextButton(
-              onPressed: () {
-                Navigator.of(context).pop();
-              },
-              child: Text('OK'),
-            ),
-          ],
-        );
-      },
-    );
+    print('Play Recording');
+    await _player.startPlayer(fromURI: _filePath);
   }
 
   @override
@@ -124,27 +137,44 @@ class _MyHomePageState extends State<MyHomePage> {
               title: Text(widget.title),
             ),
             body: Center(
-              child: Row(
+              child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: <Widget>[
-                  FloatingActionButton(
-                    onPressed: isInitialized ? _startRecording : null,
-                    tooltip: 'Start Recording',
-                    child: Icon(Icons.mic),
+                  Text(
+                    isRecording
+                        ? 'Recording... $_recordDuration seconds elapsed'
+                        : 'Not recording',
+                    style: TextStyle(color: Colors.yellow, fontSize: 20),
                   ),
-                  FloatingActionButton(
-                    onPressed: isInitialized ? _stopRecording : null,
-                    tooltip: 'Stop Recording',
-                    child: Icon(Icons.stop),
+                  SizedBox(height: 20),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                    children: <Widget>[
+                      FloatingActionButton(
+                        heroTag: null,
+                        onPressed: isInitialized && !isRecording ? _startRecording : null,
+                        tooltip: 'Start Recording',
+                        child: Icon(Icons.mic, size: 40, color: Colors.yellow),
+                      ),
+                      FloatingActionButton(
+                        heroTag: null,
+                        onPressed: isInitialized && isRecording ? _stopRecording : null,
+                        tooltip: 'Stop Recording',
+                        child: Icon(Icons.stop, size: 40, color: Colors.yellow),
+                      ),
+                    ],
                   ),
-                  FloatingActionButton(
-                    onPressed: isInitialized ? _playRecording : null,
-                    tooltip: 'Play Recording',
-                    child: Icon(Icons.play_arrow),
-                  ),
-                  ElevatedButton(
-                    onPressed: _checkFile,
-                    child: Text('Check File'),
+                  SizedBox(height: 20),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                    children: <Widget>[
+                      FloatingActionButton(
+                        heroTag: null,
+                        onPressed: isInitialized && !isRecording ? _playRecording : null,
+                        tooltip: 'Play Recording',
+                        child: Icon(Icons.play_arrow, size: 40, color: Colors.yellow),
+                      ),
+                    ],
                   ),
                 ],
               ),
