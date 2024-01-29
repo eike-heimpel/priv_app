@@ -1,10 +1,12 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_sound/flutter_sound.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:local_auth/local_auth.dart';
 import 'package:permission_handler/permission_handler.dart';
-import 'package:path_provider/path_provider.dart' as path_provider;
-import 'dart:convert';
 import 'package:encrypt/encrypt.dart' as encrypt;
 
 void main() {
@@ -15,7 +17,7 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Eike Builds an App',
+      title: 'Privacy App',
       theme: ThemeData(
         brightness: Brightness.dark,
         primaryColor: Colors.grey[700],
@@ -34,7 +36,7 @@ class MyApp extends StatelessWidget {
           bodyText2: TextStyle(color: Colors.white),
         ),
       ),
-      home: MyHomePage(title: 'Eike`s Privacy Data Collector'),
+      home: MyHomePage(title: 'Privacy App Home Page'),
     );
   }
 }
@@ -51,14 +53,15 @@ class MyHomePage extends StatefulWidget {
 class _MyHomePageState extends State<MyHomePage> {
   late FlutterSoundRecorder _recorder;
   late FlutterSoundPlayer _player;
-  String _folderName = 'MyAppFolder';
-  String _fileName = 'temp2.wav';
+  String _fileName = 'temp.aac';
   String _filePath = '';
   Future<void>? _init;
   bool isRecording = false;
   int _recordDuration = 0;
   late Timer _timer;
   bool isInitialized = false;
+  final _localAuth = LocalAuthentication();
+  final _storage = FlutterSecureStorage();
 
   @override
   void initState() {
@@ -68,22 +71,21 @@ class _MyHomePageState extends State<MyHomePage> {
     _init = _initialize();
   }
 
-Future<void> _initialize() async {
-  final appTemporaryDirectory = await path_provider.getTemporaryDirectory();
-  final folder = Directory('${appTemporaryDirectory.path}/$_folderName');
-  if (!folder.existsSync()) {
-    folder.createSync();
+  Future<void> _initialize() async {
+    var permission = await Permission.microphone.request();
+    if (permission != PermissionStatus.granted) {
+      throw Exception('Microphone permission not granted');
+    }
+
+    _filePath = (await getTemporaryDirectory()).path + '/$_fileName';
+
+    await _recorder.openRecorder();
+    await _player.openPlayer();
+
+    setState(() {
+      isInitialized = true;
+    });
   }
-  _filePath = '${folder.path}/$_fileName';
-
-  await _recorder.openRecorder();
-  await _player.openPlayer();
-
-  setState(() {
-    isInitialized = true;
-  });
-}
-
 
   @override
   void dispose() async {
@@ -93,7 +95,6 @@ Future<void> _initialize() async {
   }
 
   Future<void> _startRecording() async {
-    print('Start Recording');
     await _recorder.startRecorder(toFile: _filePath);
 
     setState(() {
@@ -112,110 +113,106 @@ Future<void> _initialize() async {
     });
   }
 
-Future<void> _stopRecording() async {
-  print('Stop Recording');
-  await _recorder.stopRecorder();
+  Future<void> _stopRecording() async {
+    await _recorder.stopRecorder();
 
-  setState(() {
-    isRecording = false;
-  });
+    setState(() {
+      isRecording = false;
+    });
 
-  _timer.cancel();
+    _timer.cancel();
 
-  // Encrypt the recording
-  final plainData = await File(_filePath).readAsBytes();
-  final key = encrypt.Key.fromLength(32); // 256 bit key for AES-256
-  final iv = encrypt.IV.fromLength(16); // 128 bit block size for AES
-  final encrypter = encrypt.Encrypter(encrypt.AES(key));
-  final encryptedData = encrypter.encryptBytes(plainData, iv: iv);
-  
-  // Write encrypted data back to file
-  await File(_filePath).writeAsBytes(encryptedData.bytes);
-}
+    // Encrypt the recording
+    String? keyString = await _storage.read(key: 'my_key');
+    if (keyString == null) {
+      print('Key not found in storage');
+      return;
+    }
+    final keyData = base64Url.decode(keyString);
+    final key = encrypt.Key(keyData);
+    final iv = encrypt.IV.fromLength(16);
 
-Future<void> _playRecording() async {
-  print('Play Recording');
+    final encrypter = encrypt.Encrypter(encrypt.AES(key));
 
-  // Decrypt the recording
-  final encryptedData = await File(_filePath).readAsBytes();
-  final key = encrypt.Key.fromLength(32); // 256 bit key for AES-256
-  final iv = encrypt.IV.fromLength(16); // 128 bit block size for AES
-  final encrypter = encrypt.Encrypter(encrypt.AES(key));
-  
-  final encryptedFile = encrypt.Encrypted(encryptedData);
-  final decryptedData = encrypter.decryptBytes(encryptedFile, iv: iv);
+    final file = File(_filePath);
+    final fileBytes = file.readAsBytesSync();
 
-  // Write decrypted data to a temporary file
-  final tempFile = File('$_filePath.temp');
-  await tempFile.writeAsBytes(decryptedData);
+    final encrypted = encrypter.encryptBytes(fileBytes, iv: iv);
+    final encryptedFile = File(_filePath);
+    await encryptedFile.writeAsBytes(encrypted.bytes);
+  }
 
-  await _player.startPlayer(fromURI: tempFile.path);
+  Future<void> _playRecording() async {
+    // Decrypt the recording
+    String? keyString = await _storage.read(key: 'my_key');
+    if (keyString == null) {
+      print('Key not found in storage');
+      return;
+    }
+    final keyData = base64Url.decode(keyString);
+    final key = encrypt.Key(keyData);
+    final iv = encrypt.IV.fromLength(16);
 
-  // Delete the temporary file
-  await tempFile.delete();
-}
+    final encrypter = encrypt.Encrypter(encrypt.AES(key));
 
+    final file = File(_filePath);
+    final fileBytes = file.readAsBytesSync();
 
+    final decrypted = encrypter.decryptBytes(encrypt.Encrypted(fileBytes), iv: iv);
+    final decryptedFile = File(_filePath);
+    await decryptedFile.writeAsBytes(decrypted);
 
+    await _player.startPlayer(fromURI: _filePath);
+  }
+
+  Future<void> _deleteRecording() async {
+    final file = File(_filePath);
+    if (await file.exists()) {
+      await file.delete();
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
-    return FutureBuilder(
-      future: _init,
-      builder: (BuildContext context, AsyncSnapshot<void> snapshot) {
-        if (snapshot.connectionState == ConnectionState.done) {
-          return Scaffold(
-            appBar: AppBar(
-              title: Text(widget.title),
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(widget.title),
+      ),
+      body: Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: <Widget>[
+            Text(
+              'Press the button to start recording.',
             ),
-            body: Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: <Widget>[
-                  Text(
-                    isRecording
-                        ? 'Recording... $_recordDuration seconds elapsed'
-                        : 'Not recording',
-                    style: TextStyle(color: Colors.yellow, fontSize: 20),
-                  ),
-                  SizedBox(height: 20),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                    children: <Widget>[
-                      FloatingActionButton(
-                        heroTag: null,
-                        onPressed: isInitialized && !isRecording ? _startRecording : null,
-                        tooltip: 'Start Recording',
-                        child: Icon(Icons.mic, size: 40, color: Colors.yellow),
-                      ),
-                      FloatingActionButton(
-                        heroTag: null,
-                        onPressed: isInitialized && isRecording ? _stopRecording : null,
-                        tooltip: 'Stop Recording',
-                        child: Icon(Icons.stop, size: 40, color: Colors.yellow),
-                      ),
-                    ],
-                  ),
-                  SizedBox(height: 20),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                    children: <Widget>[
-                      FloatingActionButton(
-                        heroTag: null,
-                        onPressed: isInitialized && !isRecording ? _playRecording : null,
-                        tooltip: 'Play Recording',
-                        child: Icon(Icons.play_arrow, size: 40, color: Colors.yellow),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
+            Text(
+              'Recording duration: $_recordDuration',
+              style: Theme.of(context).textTheme.headline4,
             ),
-          );
-        } else {
-          return CircularProgressIndicator();
-        }
-      },
+          ],
+        ),
+      ),
+      floatingActionButton: isInitialized ? 
+      Row(
+        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+        children: <Widget>[
+          FloatingActionButton(
+            onPressed: isInitialized && !isRecording ? _startRecording : null,
+            tooltip: 'Start Recording',
+            child: Icon(Icons.mic, size: 40, color: Colors.yellow),
+          ),
+          FloatingActionButton(
+            onPressed: isInitialized && isRecording ? _stopRecording : null,
+            tooltip: 'Stop Recording',
+            child: Icon(Icons.stop, size: 40, color: Colors.yellow),
+          ),
+          FloatingActionButton(
+            onPressed: isInitialized && !isRecording ? _playRecording : null,
+            tooltip: 'Play Recording',
+            child: Icon(Icons.play_arrow, size: 40, color: Colors.yellow),
+          ),
+        ],
+      ) : null,
     );
   }
 }
